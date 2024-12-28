@@ -1,172 +1,26 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  ErrorCode,
-  McpError,
-  ListToolsRequestSchema,
-  CallToolRequestSchema
-} from "@modelcontextprotocol/sdk/types.js";
-import axios from 'axios';
+import { ErrorCode, McpError, ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import Anthropic from '@anthropic-ai/sdk';
 
-// Load config from environment variables and optional config file
+// Load configuration
 function loadConfig() {
   const apiKey = process.env.ANTHROPIC_API_KEY;
+  const workspace = process.env.ANTHROPIC_WORKSPACE_ID; // Optional workspace ID for usage segmentation
+  
   if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY environment variable is required");
+    throw new Error("ANTHROPIC_API_KEY environment variable is required. Generate one at https://console.anthropic.com/account/keys");
   }
-
-  let userPreferences = {};
-  const configPath = process.env.ANTHROPIC_CONFIG_PATH;
   
-  if (configPath) {
-    try {
-      userPreferences = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      console.error(`Loaded user preferences from ${configPath}`);
-    } catch (error) {
-      console.error(`Warning: Failed to load config file: ${error.message}`);
-    }
-  }
-
-  // Validate userPreferences against known Anthropic parameters
-  const validParameters = new Set([
-    'max_tokens',
-    'metadata',
-    'stop_sequences',
-    'system',
-    'temperature',
-    'top_p',
-    'top_k'
-  ]);
-
-  // Remove any invalid parameters but don't error
-  Object.keys(userPreferences).forEach(key => {
-    if (!validParameters.has(key)) {
-      console.error(`Warning: Ignoring invalid parameter in config: ${key}`);
-      delete userPreferences[key];
-    }
-  });
-
-  return {
-    apiKey,
-    baseURL: process.env.ANTHROPIC_API_URL || "https://api.anthropic.com",
-    preferences: userPreferences
-  };
+  return { apiKey, workspace };
 }
 
-// Anthropic API client
-// Task complexity estimation helper
-function estimateComplexity(text) {
-  // Basic heuristics for task complexity
-  const factors = {
-    length: text.length,
-    questionMarks: (text.match(/\?/g) || []).length,
-    codeBlocks: (text.match(/```/g) || []).length,
-    structuredData: (text.match(/[{[].*[}\]]/g) || []).length
-  };
-  
-  const score = factors.length / 100 + 
-                factors.questionMarks * 2 + 
-                factors.codeBlocks * 5 +
-                factors.structuredData * 3;
-                
-  return score;
-}
-
-import fs from 'fs';
-
-class AnthropicClient {
-  constructor(config) {
-    this.client = axios.create({
-      baseURL: config.baseURL,
-      headers: {
-        'x-api-key': config.apiKey,
-        'anthropic-version': '2024-02-29',
-        'content-type': 'application/json'
-      }
-    });
-    this.preferences = config.preferences;
-  }
-
-  async createMessage(params) {
-    // Smart model selection based on task complexity
-    if (!params.model) {
-      const complexity = params.messages.reduce((acc, msg) => 
-        acc + estimateComplexity(msg.content), 0);
-      
-      params.model = complexity < 10 ? 'claude-3-haiku-20240307' :
-                    complexity < 30 ? 'claude-3-sonnet-20240229' :
-                    'claude-3-opus-20240229';
-    }
-    
-    // Auto-batch for large requests
-    const tokenEstimate = params.messages.reduce((acc, msg) => 
-      acc + msg.content.length / 4, 0);
-      
-    if (tokenEstimate > 150000) { // Large context
-      throw new Error('Message too large - use batch processing endpoint');
-    }
-    try {
-      // Merge user preferences with request params, letting request params take precedence
-      const requestBody = {
-        model: params.model || 'claude-3-opus-20240229',
-        messages: params.messages,
-        ...this.preferences,  // Apply user preferences from config
-        ...params,  // Request params override preferences
-        
-        // Special handling for metadata to allow merging instead of overriding
-        metadata: {
-          ...this.preferences.metadata,
-          ...params.metadata
-        }
-      };
-      return response.data;
-    } catch (error) {
-      if (error.response) {
-        throw new Error(`Anthropic API error: ${error.response.data.error?.message || error.message}`);
-      }
-      throw error;
-    }
-  }
-
-  async batchProcess(tasks, concurrency = 3) {
-    const results = [];
-    const errors = [];
-    
-    // Process in chunks based on concurrency
-    for (let i = 0; i < tasks.length; i += concurrency) {
-      const chunk = tasks.slice(i, i + concurrency);
-      const promises = chunk.map(async (task) => {
-        try {
-          return await this.createMessage(task);
-        } catch (error) {
-          errors.push({ taskIndex: i, error: error.message });
-          return null;
-        }
-      });
-      
-      const chunkResults = await Promise.all(promises);
-      results.push(...chunkResults.filter(r => r !== null));
-    }
-    
-    return { results, errors };
-  }
-
-  async listModels() {
-    try {
-      const response = await this.client.get('/v1/models');
-      return response.data;
-    } catch (error) {
-      if (error.response) {
-        throw new Error(`Anthropic API error: ${error.response.data.error?.message || error.message}`);
-      }
-      throw error;
-    }
-  }
-}
-
-// MCP Server setup
+// Set up MCP server
 const config = loadConfig();
-const client = new AnthropicClient(config);
+const client = new Anthropic({
+  apiKey: config.apiKey,
+  ...(config.workspace && { workspace: config.workspace })
+});
 
 const server = new Server({
   name: "anthropic-mcp-server",
@@ -175,57 +29,24 @@ const server = new Server({
   capabilities: { tools: {} }
 });
 
-// Tool definitions
+// Define available tools
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [{
-    name: "anthropic__batch_process",
-    description: "Process multiple messages in parallel with automatic model selection",
+    name: "list_models",
+    description: "List all available Anthropic models and their capabilities. Access requires a valid API key configured through the ANTHROPIC_API_KEY environment variable.",
     inputSchema: {
       type: "object",
-      properties: {
-        tasks: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              messages: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    role: { type: "string", enum: ["user", "assistant"] },
-                    content: { type: "string" }
-                  },
-                  required: ["role", "content"]
-                }
-              },
-              system: { type: "string" }
-            },
-            required: ["messages"]
-          }
-        },
-        concurrency: {
-          type: "number",
-          description: "Number of concurrent API calls (default: 3)",
-          minimum: 1,
-          maximum: 5
-        }
-      },
-      required: ["tasks"]
+      properties: {}
     }
   }, {
-    name: "anthropic__create_message",
-    description: "Create a message using Anthropic's API",
+    name: "send_message",
+    description: "Send a message to an Anthropic model using the Messages API. Requires authentication via ANTHROPIC_API_KEY environment variable. Optionally supports workspace segmentation via ANTHROPIC_WORKSPACE_ID.",
     inputSchema: {
       type: "object",
       properties: {
-        model: {
-          type: "string",
-          description: "Model ID to use (e.g., claude-3-opus-20240229)"
-        },
         messages: {
           type: "array",
-          description: "Array of messages for the conversation",
+          description: "Array of messages to send",
           items: {
             type: "object",
             properties: {
@@ -240,58 +61,48 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             required: ["role", "content"]
           }
         },
-        system: {
+        model: {
           type: "string",
-          description: "Optional system prompt"
+          description: "Model ID to use (e.g., claude-3-opus-20240229)",
+          default: "claude-3-opus-20240229"
         },
         max_tokens: {
           type: "number",
-          description: "Maximum number of tokens to generate"
-        },
-        temperature: {
-          type: "number",
-          description: "Temperature for response generation (0.0-1.0)"
+          description: "Maximum tokens to generate",
+          default: 1024
         }
       },
       required: ["messages"]
     }
-  }, {
-    name: "anthropic__list_models",
-    description: "List available Anthropic models",
-    inputSchema: {
-      type: "object",
-      properties: {}
-    }
   }]
 }));
 
-// Tool handlers
+// Handle tool execution
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
     switch (name) {
-      case "anthropic__create_message": {
-        const result = await client.createMessage(args);
+      case "list_models": {
+        const models = await client.models.list();
         return {
           content: [{
             type: "text",
-            text: JSON.stringify(result, null, 2)
+            text: JSON.stringify(models, null, 2)
           }]
         };
       }
-      case "anthropic__batch_process": {
-        const { tasks, concurrency } = args;
-        const result = await client.batchProcess(tasks, concurrency);
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify(result, null, 2)
-          }]
-        };
-      }
-      case "anthropic__list_models": {
-        const result = await client.listModels();
+      case "send_message": {
+        if (!Array.isArray(args.messages) || args.messages.length === 0) {
+          throw new McpError(ErrorCode.InvalidParams, "Messages array is required");
+        }
+
+        const result = await client.messages.create({
+          model: args.model || "claude-3-opus-20240229",
+          max_tokens: args.max_tokens || 1024,
+          messages: args.messages
+        });
+
         return {
           content: [{
             type: "text",
@@ -300,12 +111,40 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
       default:
-        throw new McpError(
-          ErrorCode.MethodNotFound,
-          `Unknown tool: ${name}`
-        );
+        throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
     }
   } catch (error) {
+    // Handle API errors
+    if (error instanceof Anthropic.APIError) {
+      if (error.status === 401) {
+        return {
+          content: [{
+            type: "text",
+            text: "Invalid API key. Please check your ANTHROPIC_API_KEY environment variable."
+          }],
+          isError: true
+        };
+      }
+      if (error.status === 403) {
+        return {
+          content: [{
+            type: "text",
+            text: "Access forbidden. Please verify your API key permissions and workspace access."
+          }],
+          isError: true
+        };
+      }
+      return {
+        content: [{
+          type: "text",
+          text: `Anthropic API error: ${error.message}`
+        }],
+        isError: true
+      };
+    }
+    
+    // Handle other errors
+    console.error(error);
     return {
       content: [{
         type: "text",

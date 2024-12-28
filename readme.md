@@ -1,138 +1,104 @@
-# Anthropic MCP Server
+# Anthropic API MCP Server
 
-A [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol) server that provides intelligent access to Anthropic's API with smart model selection, parallel processing, and configurable defaults. Enables parallel processing and context management while maintaining separate API quotas from Claude Desktop. [More about MCP](https://modelcontextprotocol.io/introduction).
+A [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol) server that provides access to Anthropic's AI models through their official API. List available models and send messages to Claude using a secure, standardized interface. [More about MCP](https://modelcontextprotocol.io/introduction).
+
+[![Anthropic API MCP Server](https://glama.ai/mcp/servers/badge)]()
 
 ## Features
-- Smart model selection based on task complexity
-- Parallel processing with configurable concurrency
-- Configurable defaults via JSON configuration file
-- Separate API quota from Claude Desktop
-- Full support for all Anthropic API parameters
-- Automatic token estimation and batch processing
+
+* List all available Anthropic models
+* Send messages to any Anthropic model
+* Secure API key management
+* Support for workspace segmentation
+* Automatic API versioning
+* Comprehensive error handling
 
 ## Why Use This Server?
-While Claude Desktop uses Anthropic's API internally, this server provides several advantages:
-- Separate API quota from Claude Desktop
-- Parallel processing capabilities
-- Configurable defaults across conversations
-- Smart model selection for cost optimization
-- Ability to offload heavy processing from main conversation
+
+Unlike direct API integration, this server:
+
+* Provides a standardized MCP interface for Anthropic's API
+* Handles authentication and versioning automatically
+* Supports workspace isolation for different use cases
+* Integrates seamlessly with Claude Desktop and other MCP clients
+* Includes detailed error messages and validation
 
 ## Installation
+
 ```bash
-npm install server-anthropic
+npm install anthropic-mcp-server
 ```
-
-## Configuration
-Create an optional `anthropic-config.json` with your preferred defaults:
-
-```json
-{
-  "max_tokens": 4096,
-  "temperature": 0.7,
-  "top_p": 1,
-  "metadata": {
-    "user_id": "user_123",
-    "session_id": "default_session"
-  },
-  "system": "You are a helpful AI assistant focused on accuracy and clarity.",
-  "stop_sequences": ["\n###\n"]
-}
-```
-
-All configuration parameters are optional. Invalid parameters are ignored with a warning.
 
 ## Tool Reference
 
-### `anthropic__create_message`
-Create a message using Anthropic's API with smart model selection.
+### `list_models`
+
+Lists all available Anthropic models and their capabilities.
 
 **Arguments:**
 ```json
 {
-  "model": {
-    "type": "string",
-    "description": "Model ID to use (e.g., claude-3-opus-20240229)",
-    "optional": true
-  },
+  // No arguments required
+}
+```
+
+**Returns:**
+```json
+{
+  "models": [
+    {
+      "name": "claude-3-opus-20240229",
+      "description": "Most powerful model for highly complex tasks",
+      ...
+    },
+    ...
+  ]
+}
+```
+
+### `send_message`
+
+Send a message to an Anthropic model using the Messages API.
+
+**Arguments:**
+```json
+{
   "messages": {
     "type": "array",
-    "description": "Array of messages for the conversation",
-    "required": true,
+    "description": "Array of messages to send",
     "items": {
-      "type": "object",
-      "properties": {
-        "role": {
-          "type": "string",
-          "enum": ["user", "assistant"]
-        },
-        "content": {
-          "type": "string"
-        }
-      }
-    }
+      "role": "user | assistant",
+      "content": "string"
+    },
+    "required": true
   },
-  "system": {
+  "model": {
     "type": "string",
-    "description": "Optional system prompt",
-    "optional": true
+    "description": "Model ID to use",
+    "default": "claude-3-opus-20240229"
   },
   "max_tokens": {
     "type": "number",
-    "description": "Maximum number of tokens to generate",
-    "optional": true
-  },
-  "temperature": {
-    "type": "number",
-    "description": "Temperature for response generation (0.0-1.0)",
-    "optional": true
+    "description": "Maximum tokens to generate",
+    "default": 1024
   }
 }
 ```
 
-### `anthropic__batch_process`
-Process multiple messages in parallel with automatic model selection.
-
-**Arguments:**
+**Returns:**
 ```json
 {
-  "tasks": {
-    "type": "array",
-    "description": "Array of message creation tasks",
-    "required": true,
-    "items": {
-      "type": "object",
-      "properties": {
-        "messages": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "role": { "type": "string", "enum": ["user", "assistant"] },
-              "content": { "type": "string" }
-            }
-          }
-        },
-        "system": { "type": "string", "optional": true }
-      }
+  "content": [
+    {
+      "type": "text",
+      "text": "Model response..."
     }
-  },
-  "concurrency": {
-    "type": "number",
-    "description": "Number of concurrent API calls (default: 3)",
-    "minimum": 1,
-    "maximum": 5,
-    "optional": true
-  }
+  ]
 }
 ```
 
-### `anthropic__list_models`
-List available Anthropic models.
-
-**Arguments:** None required
-
 ## Usage with Claude Desktop
+
 Add to your `claude_desktop_config.json`:
 
 ```json
@@ -140,74 +106,49 @@ Add to your `claude_desktop_config.json`:
   "mcpServers": {
     "anthropic": {
       "command": "npx",
-      "args": ["-y", "server-anthropic"],
+      "args": ["-y", "anthropic-mcp-server"],
       "env": {
         "ANTHROPIC_API_KEY": "your-api-key-here",
-        "ANTHROPIC_CONFIG_PATH": "/path/to/your/anthropic-config.json"  // Optional
+        "ANTHROPIC_WORKSPACE_ID": "optional-workspace-id"
       }
     }
   }
 }
 ```
 
-## Usage Patterns
+## Environment Variables
 
-### Research Assistant Pattern
-```javascript
-// Main Claude conversation delegates research tasks
-const researchTasks = [
-  { messages: [{ role: "user", content: "Summarize paper X" }] },
-  { messages: [{ role: "user", content: "Analyze methodology of Y" }] },
-  { messages: [{ role: "user", content: "Compare findings of Z" }] }
-];
-
-// Process in parallel via API while main conversation continues
-await batchProcess(researchTasks);
-```
-
-### Data Processing Pattern
-```javascript
-// Process large datasets without cluttering main context
-const dataChunks = data.map(chunk => ({
-  messages: [{
-    role: "user",
-    content: `Analyze this data: ${JSON.stringify(chunk)}`
-  }]
-}));
-
-await batchProcess(dataChunks, 5); // Higher concurrency for data processing
-```
-
-### Hierarchical Processing Pattern
-```javascript
-// Main Claude conversation handles high-level logic
-// API handles granular tasks with appropriate models
-const tasks = subtasks.map(task => ({
-  messages: [{ role: "user", content: task }],
-  system: "You are focusing only on this specific subtask"
-}));
-```
-
-## Smart Model Selection
-The server automatically selects the most appropriate model based on task complexity:
-- Simple tasks (complexity < 10): claude-3-haiku
-- Medium tasks (complexity < 30): claude-3-sonnet
-- Complex tasks: claude-3-opus
-
-Complexity is calculated based on:
-- Text length
-- Number of questions
-- Presence of code blocks
-- Structured data complexity
+| Variable | Required | Description |
+|----------|----------|-------------|
+| ANTHROPIC_API_KEY | Yes | Your Anthropic API key from [console.anthropic.com](https://console.anthropic.com/account/keys) |
+| ANTHROPIC_WORKSPACE_ID | No | Optional workspace ID for usage segmentation |
 
 ## Dependencies
-- @modelcontextprotocol/sdk - MCP implementation
-- axios - HTTP client
 
-## Environment Variables
-- `ANTHROPIC_API_KEY` (required) - Your Anthropic API key
-- `ANTHROPIC_CONFIG_PATH` (optional) - Path to your configuration JSON file
-- `ANTHROPIC_API_URL` (optional) - Custom API endpoint (defaults to https://api.anthropic.com)
+* @modelcontextprotocol/sdk - Core MCP functionality
+* @anthropic-ai/sdk - Official Anthropic API client
+
+## Error Handling
+
+The server provides detailed error messages for common issues:
+
+* Invalid API key
+* Missing required parameters
+* Rate limiting
+* Model-specific errors
+* Network connectivity issues
+
+## Development
+
+1. Clone the repository
+2. Install dependencies: `npm install`
+3. Set up environment variables in `.env`:
+   ```
+   ANTHROPIC_API_KEY=your-api-key
+   ANTHROPIC_WORKSPACE_ID=optional-workspace
+   ```
+4. Start the server: `npm start`
 
 ## License
+
 MIT
