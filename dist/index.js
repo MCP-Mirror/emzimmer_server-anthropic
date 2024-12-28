@@ -23,8 +23,8 @@ const client = new Anthropic({
 });
 
 const server = new Server({
-  name: "anthropic-mcp-server",
-  version: "1.0.0"
+  name: "server-anthropic",
+  version: "0.1.0"
 }, {
   capabilities: { tools: {} }
 });

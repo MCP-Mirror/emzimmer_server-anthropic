@@ -1,6 +1,6 @@
 {
-  "name": "anthropic-mcp-server",
-  "version": "1.0.0",
+  "name": "server-anthropic",
+  "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

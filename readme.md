@@ -26,7 +26,7 @@ Unlike direct API integration, this server:
 ## Installation
 
 ```bash
-npm install anthropic-mcp-server
+npm install server-anthropic
 ```
 
 ## Tool Reference
@@ -106,7 +106,7 @@ Add to your `claude_desktop_config.json`:
   "mcpServers": {
     "anthropic": {
       "command": "npx",
-      "args": ["-y", "anthropic-mcp-server"],
+      "args": ["-y", "server-anthropic"],
       "env": {
         "ANTHROPIC_API_KEY": "your-api-key-here",
         "ANTHROPIC_WORKSPACE_ID": "optional-workspace-id"
